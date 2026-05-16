@@ -2,7 +2,7 @@ import soundfile as sf
 import numpy as np
 
 class Track:
-    def __init__(self, file_path: str, title: str = "Unknown", artist: str = "Unknown"):
+    def __init__(self, file_path: str, title: str = "Unknown", artist: str = "Unknown", bpm: float = 120.0, drop_timestamp: float = 0.0):
         """
         Wraps an audio file to manage block reading and state.
         
@@ -12,6 +12,8 @@ class Track:
         self.file_path = file_path
         self.title = title
         self.artist = artist
+        self.bpm = bpm
+        self.drop_timestamp = drop_timestamp
         self.sf_file = sf.SoundFile(file_path)
         self.sample_rate = self.sf_file.samplerate
         self.channels = self.sf_file.channels
@@ -22,23 +24,25 @@ class Track:
             
         self.done = False
 
-    def read_frames(self, num_frames: int) -> np.ndarray:
+    def get_audio_block(self, blocksize: int, frames_to_read: int = None) -> np.ndarray:
         """
-        Reads `num_frames` from the file. If EOF is reached, pads the rest with zeros.
+        Reads a block of audio. 
+        If frames_to_read is provided, reads that many frames (useful for resampling/pitch shifting).
+        Returns exactly frames_to_read or blocksize frames. If EOF is reached, pads with zeros.
         """
         if self.done:
-            return np.zeros((num_frames, self.channels), dtype=np.float32)
-            
-        data = self.sf_file.read(num_frames, dtype='float32')
-        frames_read = data.shape[0]
-        
-        if frames_read < num_frames:
+            return np.zeros((blocksize if frames_to_read is None else frames_to_read, self.channels), dtype=np.float32)
+
+        read_size = frames_to_read if frames_to_read is not None else blocksize
+        data = self.sf_file.read(read_size, dtype='float32')
+
+        if len(data) < read_size:
             self.done = True
-            # Pad with zeros if we reached EOF
-            padded = np.zeros((num_frames, self.channels), dtype=np.float32)
-            padded[:frames_read, :] = data
-            return padded
-            
+            # Pad the remaining buffer with zeros
+            pad_size = read_size - len(data)
+            pad = np.zeros((pad_size, self.channels), dtype=np.float32)
+            data = np.vstack((data, pad)) if len(data) > 0 else pad
+
         return data
         
     def get_position(self) -> float:

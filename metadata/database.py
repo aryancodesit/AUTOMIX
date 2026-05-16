@@ -34,9 +34,17 @@ class Database:
                 mode INTEGER,
                 camelot TEXT,
                 energy REAL,
-                FOREIGN KEY (track_id) REFERENCES Tracks(id)
+                drop_timestamp REAL DEFAULT 0.0,
+                FOREIGN KEY(track_id) REFERENCES Tracks(id)
             )
         """)
+        
+        # Migration: Add drop_timestamp if upgrading from older version
+        try:
+            cursor.execute("SELECT drop_timestamp FROM AudioFeatures LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE AudioFeatures ADD COLUMN drop_timestamp REAL DEFAULT 0.0")
+            
         self.conn.commit()
 
     def add_track(self, file_path: str, title: str, artist: str, duration_ms: int = 0) -> int:
@@ -53,18 +61,18 @@ class Database:
             cursor.execute("SELECT id FROM Tracks WHERE file_path = ?", (file_path,))
             return cursor.fetchone()['id']
 
-    def add_audio_features(self, track_id: int, bpm: float, key: int, mode: int, camelot: str, energy: float):
+    def add_audio_features(self, track_id: int, bpm: float, key: int, mode: int, camelot: str, energy: float, drop_timestamp: float = 0.0):
         cursor = self.conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO AudioFeatures (track_id, bpm, key, mode, camelot, energy)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (track_id, bpm, key, mode, camelot, energy))
+            INSERT OR REPLACE INTO AudioFeatures (track_id, bpm, key, mode, camelot, energy, drop_timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (track_id, bpm, key, mode, camelot, energy, drop_timestamp))
         self.conn.commit()
 
     def get_all_tracks(self) -> List[Dict]:
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT t.id, t.file_path, t.title, t.artist, t.duration_ms, a.bpm, a.camelot, a.energy 
+            SELECT t.id, t.file_path, t.title, t.artist, t.duration_ms, a.bpm, a.camelot, a.energy, a.drop_timestamp 
             FROM Tracks t
             LEFT JOIN AudioFeatures a ON t.id = a.track_id
         """)

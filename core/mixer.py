@@ -20,6 +20,8 @@ class Mixer:
         self.is_crossfading = False
         self.crossfade_duration = 0.0
         self.crossfade_progress = 0.0
+        self.crossfade_frames = 0
+        self.crossfade_total = 1
         self.bass_swap = False
         self.is_paused = False
         
@@ -58,6 +60,8 @@ class Mixer:
         self.is_crossfading = True
         self.crossfade_duration = duration_sec
         self.crossfade_progress = 0.0
+        self.crossfade_frames = 0
+        self.crossfade_total = int(duration_sec * self.sample_rate)
         self.bass_swap = bass_swap
         logger.info(f"Started crossfade: {duration_sec}s, bass_swap={bass_swap}")
 
@@ -127,16 +131,71 @@ class Mixer:
             self.crossover_b = CrossoverFilter(self.sample_rate)
             logger.info("Crossfade complete. Deck B is now Deck A.")
 
-    def get_audio_block(self, frames: int) -> np.ndarray:
-        """Called by the AudioEngine callback to fetch the next audio block."""
-        out_buffer = np.zeros((frames, 2), dtype=np.float32)
-        
+    def get_audio_block(self, blocksize: int) -> np.ndarray:
         if self.is_paused:
-            return out_buffer
+            return np.zeros((blocksize, 2), dtype=np.float32)
             
-        if self.is_crossfading:
-            self._apply_crossfade(frames, out_buffer)
-        elif self.deck_a:
-            out_buffer = self.deck_a.read_frames(frames)
+        if self.deck_a is None:
+            return np.zeros((blocksize, 2), dtype=np.float32)
+
+        # Base case: not crossfading
+        if not self.is_crossfading:
+            return self.deck_a.get_audio_block(blocksize) * self.master_volume
+
+        # Crossfading logic with Vinyl Resampling (BPM Ramping)
+        self.crossfade_frames += blocksize
+        progress = min(self.crossfade_frames / self.crossfade_total, 1.0)
+        
+        # Calculate dynamic ratio for Deck A to pitch/tempo shift towards Deck B
+        target_ratio = self.deck_b.bpm / self.deck_a.bpm if (self.deck_b and self.deck_a.bpm > 0) else 1.0
+        # Deck A ratio goes from 1.0 -> target_ratio
+        ratio_A = 1.0 + (target_ratio - 1.0) * progress
+        
+        frames_to_read_A = int(blocksize * ratio_A)
+        data_a_raw = self.deck_a.get_audio_block(blocksize, frames_to_read=frames_to_read_A)
+        
+        # Resample Deck A back to blocksize using linear interpolation (Vinyl Effect)
+        if frames_to_read_A != blocksize and frames_to_read_A > 0:
+            data_a = np.zeros((blocksize, data_a_raw.shape[1]), dtype=np.float32)
+            old_indices = np.linspace(0, frames_to_read_A - 1, frames_to_read_A)
+            new_indices = np.linspace(0, frames_to_read_A - 1, blocksize)
+            for c in range(data_a_raw.shape[1]):
+                data_a[:, c] = np.interp(new_indices, old_indices, data_a_raw[:, c])
+        else:
+            data_a = data_a_raw
+
+        # Deck B always plays at 1.0 (it is the master tempo target)
+        data_b = self.deck_b.get_audio_block(blocksize) if self.deck_b else np.zeros_like(data_a)
+        
+        # Equal power crossfade curves
+        gain_a = np.cos(progress * np.pi / 2)
+        gain_b = np.sin(progress * np.pi / 2)
+
+        # Wash out Track A's highs to mask key clashes, and do bass swap
+        if self.bass_swap and hasattr(self, 'crossover_a') and self.crossover_a:
+            low_a, high_a = self.crossover_a.process(data_a)
+            low_b, high_b = self.crossover_b.process(data_b)
             
-        return out_buffer * self.master_volume
+            # Highs fade out much faster on A (washout effect)
+            gain_a_high = np.cos(progress * np.pi / 2) ** 4
+            
+            # Bass swap: B's bass comes in quickly at 50%
+            bass_gain_a = 1.0 if progress < 0.5 else np.cos((progress - 0.5) * np.pi)
+            bass_gain_b = 0.0 if progress < 0.5 else np.sin((progress - 0.5) * np.pi)
+            
+            out_a = (low_a * bass_gain_a) + (high_a * gain_a_high)
+            out_b = (low_b * bass_gain_b) + (high_b * gain_b)
+        else:
+            out_a = data_a * gain_a
+            out_b = data_b * gain_b
+        
+        # Combine
+        mixed = out_a + out_b
+
+        if progress >= 1.0:
+            self.is_crossfading = False
+            self.deck_a.close()
+            self.deck_a = self.deck_b
+            self.deck_b = None
+
+        return mixed * self.master_volume

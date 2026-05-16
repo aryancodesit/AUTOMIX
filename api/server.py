@@ -1,7 +1,8 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+import asyncio
 import logging
 import os
 
@@ -36,6 +37,37 @@ audio_engine.start()
 
 current_playlist = []
 current_track_idx = 0
+automix_active = False
+
+@app.on_event("startup")
+async def start_automix_loop():
+    asyncio.create_task(automix_loop())
+
+async def automix_loop():
+    global current_track_idx, automix_active
+    while True:
+        await asyncio.sleep(0.5)
+        if not automix_active or not mixer.deck_a or mixer.is_paused or mixer.is_crossfading:
+            continue
+            
+        pos_A = mixer.deck_a.get_position()
+        dur_A = mixer.deck_a.get_duration()
+        drop_A = mixer.deck_a.drop_timestamp
+        
+        # We transition 60 seconds after Track A's drop, or 10 seconds before it ends
+        target_time = min(drop_A + 60.0, dur_A - 10.0)
+        
+        if pos_A >= target_time and mixer.deck_b:
+            logger.info("Automix: Time to transition!")
+            
+            # Prepare Track B to hit the drop exactly when crossfade ends
+            crossfade_dur = 8.0
+            drop_B = mixer.deck_b.drop_timestamp
+            start_B = max(0.0, drop_B - crossfade_dur)
+            mixer.deck_b.set_position(start_B)
+            
+            # Trigger Crossfade
+            await do_crossfade()
 
 # Mount static directory for UI
 os.makedirs("static", exist_ok=True)
@@ -140,7 +172,8 @@ async def download_track(req: DownloadRequest):
             features['key'], 
             features['mode'], 
             features['camelot'], 
-            features['energy']
+            features['energy'],
+            features['drop_timestamp']
         )
         
     return {"message": "Track downloaded and analyzed successfully", "track_id": track_id}
@@ -151,7 +184,7 @@ async def get_tracks():
 
 @app.post("/api/automix")
 async def trigger_automix(req: AutomixRequest):
-    global current_playlist, current_track_idx
+    global current_playlist, current_track_idx, automix_active
     track_ids = req.track_ids
     if not track_ids:
         return {"error": "No tracks provided"}
@@ -164,15 +197,20 @@ async def trigger_automix(req: AutomixRequest):
     
     current_playlist = ordered
     current_track_idx = 0
+    automix_active = True
     
     # Load first track immediately
     if current_playlist:
-        t = Track(current_playlist[0]['file_path'], current_playlist[0]['title'], current_playlist[0]['artist'])
+        t0 = current_playlist[0]
+        t = Track(t0['file_path'], t0['title'], t0['artist'], t0.get('bpm', 120.0), t0.get('drop_timestamp', 0.0))
+        # Start A exactly at its drop for immediate impact!
+        t.set_position(t0.get('drop_timestamp', 0.0))
         mixer.load_track_a(t)
         
         # Preload second track
         if len(current_playlist) > 1:
-            t2 = Track(current_playlist[1]['file_path'], current_playlist[1]['title'], current_playlist[1]['artist'])
+            t1 = current_playlist[1]
+            t2 = Track(t1['file_path'], t1['title'], t1['artist'], t1.get('bpm', 120.0), t1.get('drop_timestamp', 0.0))
             mixer.load_track_b(t2)
             
     return {"message": "Automix started", "playlist": current_playlist}
@@ -185,7 +223,8 @@ async def do_crossfade():
         current_track_idx += 1
         # Preload the next NEXT track if available into B
         if current_track_idx < len(current_playlist) - 1:
-            t2 = Track(current_playlist[current_track_idx + 1]['file_path'], current_playlist[current_track_idx + 1]['title'], current_playlist[current_track_idx + 1]['artist'])
+            t_next = current_playlist[current_track_idx + 1]
+            t2 = Track(t_next['file_path'], t_next['title'], t_next['artist'], t_next.get('bpm', 120.0), t_next.get('drop_timestamp', 0.0))
             mixer.load_track_b(t2)
     return {"message": "Crossfade triggered!"}
 
@@ -195,10 +234,12 @@ async def skip_next():
     if current_playlist and current_track_idx < len(current_playlist) - 1:
         current_track_idx += 1
         mixer.is_crossfading = False
-        t = Track(current_playlist[current_track_idx]['file_path'], current_playlist[current_track_idx]['title'], current_playlist[current_track_idx]['artist'])
+        t_curr = current_playlist[current_track_idx]
+        t = Track(t_curr['file_path'], t_curr['title'], t_curr['artist'], t_curr.get('bpm', 120.0), t_curr.get('drop_timestamp', 0.0))
         mixer.load_track_a(t)
         if current_track_idx < len(current_playlist) - 1:
-            t2 = Track(current_playlist[current_track_idx + 1]['file_path'], current_playlist[current_track_idx + 1]['title'], current_playlist[current_track_idx + 1]['artist'])
+            t_next = current_playlist[current_track_idx + 1]
+            t2 = Track(t_next['file_path'], t_next['title'], t_next['artist'], t_next.get('bpm', 120.0), t_next.get('drop_timestamp', 0.0))
             mixer.load_track_b(t2)
         return {"message": "Skipped to next"}
     return {"error": "End of queue"}
@@ -209,9 +250,11 @@ async def skip_prev():
     if current_playlist and current_track_idx > 0:
         current_track_idx -= 1
         mixer.is_crossfading = False
-        t = Track(current_playlist[current_track_idx]['file_path'], current_playlist[current_track_idx]['title'], current_playlist[current_track_idx]['artist'])
+        t_curr = current_playlist[current_track_idx]
+        t = Track(t_curr['file_path'], t_curr['title'], t_curr['artist'], t_curr.get('bpm', 120.0), t_curr.get('drop_timestamp', 0.0))
         mixer.load_track_a(t)
-        t2 = Track(current_playlist[current_track_idx + 1]['file_path'], current_playlist[current_track_idx + 1]['title'], current_playlist[current_track_idx + 1]['artist'])
+        t_next = current_playlist[current_track_idx + 1]
+        t2 = Track(t_next['file_path'], t_next['title'], t_next['artist'], t_next.get('bpm', 120.0), t_next.get('drop_timestamp', 0.0))
         mixer.load_track_b(t2)
         return {"message": "Skipped to prev"}
     return {"error": "Start of queue"}
@@ -240,6 +283,8 @@ async def get_state():
 
 @app.post("/api/stop")
 async def stop_playback():
+    global automix_active
+    automix_active = False
     if mixer.deck_a: mixer.deck_a.close(); mixer.deck_a = None
     if mixer.deck_b: mixer.deck_b.close(); mixer.deck_b = None
     mixer.is_paused = False

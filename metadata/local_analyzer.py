@@ -19,7 +19,8 @@ class LocalAnalyzer:
         logger.info(f"Starting deep DSP analysis for {file_path}...")
         try:
             # Load the audio (loads at 22050 by default which is fine for analysis)
-            y, sr = librosa.load(file_path, duration=60) # Analyze first 60s to save time
+            # Analyze first 120s to ensure we catch the drop
+            y, sr = librosa.load(file_path, duration=120) 
             
             # 1. BPM / Tempo
             onset_env = librosa.onset.onset_strength(y=y, sr=sr)
@@ -44,21 +45,26 @@ class LocalAnalyzer:
             mode = 1 if major_score > minor_score else 0
             camelot = CAMELOT_KEYS[mode][root_note]
             
-            # 3. Energy (RMS)
-            rms = librosa.feature.rms(y=y)
-            # Normalize energy to 0.0 - 1.0 range based on typical RMS values
+            # 3. Energy (RMS) and Drop Detection
+            rms = librosa.feature.rms(y=y)[0]
+            
+            # Find the drop (highest sustained energy peak)
+            drop_frame = int(np.argmax(rms))
+            drop_timestamp = round(float(librosa.frames_to_time(drop_frame, sr=sr)), 2)
+            
+            # Normalize energy
             mean_rms = float(np.mean(rms))
-            # Typical pop song RMS is around 0.1 to 0.3. Let's scale it.
             energy = min(max(mean_rms * 3.0, 0.0), 1.0)
             
-            logger.info(f"Analysis Complete: {bpm} BPM | Key: {camelot} | Energy: {energy}")
+            logger.info(f"Analysis Complete: {bpm} BPM | Key: {camelot} | Drop: {drop_timestamp}s | Energy: {energy}")
             
             return {
                 "bpm": round(bpm, 1),
                 "key": root_note,
                 "mode": mode,
                 "camelot": camelot,
-                "energy": round(energy, 2)
+                "energy": round(energy, 2),
+                "drop_timestamp": drop_timestamp
             }
         except Exception as e:
             logger.error(f"Error analyzing {file_path}: {e}")
@@ -67,5 +73,6 @@ class LocalAnalyzer:
                 "key": -1,
                 "mode": 1,
                 "camelot": "Unknown",
-                "energy": 0.5
+                "energy": 0.5,
+                "drop_timestamp": 15.0
             }
