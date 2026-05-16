@@ -8,6 +8,7 @@ import os
 from metadata.database import Database
 from metadata.spotify_api import SpotifyMetadataFetcher
 from metadata.smart_reorder import SmartReorder
+from metadata.local_analyzer import LocalAnalyzer
 from core.cloud_fetcher import CloudFetcher
 from core.mixer import Mixer
 from core.audio_engine import AudioEngine
@@ -130,8 +131,8 @@ async def download_track(req: DownloadRequest):
     # 2. Add to DB
     track_id = db.add_track(local_path, req.title, req.artist, req.duration_ms)
     
-    # 3. Add Audio Features
-    features = spotify.fetch_features_by_id(req.spotify_id)
+    # 3. Add Audio Features using Librosa Local Analysis
+    features = LocalAnalyzer.analyze(local_path)
     if features:
         db.add_audio_features(
             track_id, 
@@ -142,7 +143,7 @@ async def download_track(req: DownloadRequest):
             features['energy']
         )
         
-    return {"message": "Track downloaded and added to library", "track_id": track_id}
+    return {"message": "Track downloaded and analyzed successfully", "track_id": track_id}
 
 @app.get("/api/tracks")
 async def get_tracks():
