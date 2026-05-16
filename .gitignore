@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+venv/
+env/
+
+# Database
+library.db
+*.sqlite3
+
+# Audio
+*.mp3
+*.wav
+*.flac
+
+# OS
+.DS_Store
+Thumbs.db
