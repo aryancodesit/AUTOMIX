@@ -318,6 +318,12 @@ input[type="checkbox"] {
     margin: 0 auto;
 }
 
+.transport-buttons {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
 .btn-icon {
     background: none;
     border: none;

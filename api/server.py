@@ -26,10 +26,13 @@ except ValueError as e:
 
 reorder_engine = SmartReorder()
 
-# Global Audio Engine State
+# Global State
 mixer = Mixer()
 audio_engine = AudioEngine(mixer)
 audio_engine.start()
+
+current_playlist = []
+current_track_idx = 0
 
 # Mount static directory for UI
 os.makedirs("static", exist_ok=True)
@@ -48,7 +51,7 @@ class SeekRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_ui():
-    with open("static/index.html", "r") as f:
+    with open("static/index.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
 @app.post("/api/scan_directory")
@@ -93,6 +96,7 @@ async def get_tracks():
 
 @app.post("/api/automix")
 async def trigger_automix(req: AutomixRequest):
+    global current_playlist, current_track_idx
     track_ids = req.track_ids
     if not track_ids:
         return {"error": "No tracks provided"}
@@ -103,22 +107,59 @@ async def trigger_automix(req: AutomixRequest):
     # Smart Reorder
     ordered = reorder_engine.sort_playlist(selected_tracks)
     
+    current_playlist = ordered
+    current_track_idx = 0
+    
     # Load first track immediately
-    if ordered:
-        t = Track(ordered[0]['file_path'], ordered[0]['title'], ordered[0]['artist'])
+    if current_playlist:
+        t = Track(current_playlist[0]['file_path'], current_playlist[0]['title'], current_playlist[0]['artist'])
         mixer.load_track_a(t)
         
         # Preload second track
-        if len(ordered) > 1:
-            t2 = Track(ordered[1]['file_path'], ordered[1]['title'], ordered[1]['artist'])
+        if len(current_playlist) > 1:
+            t2 = Track(current_playlist[1]['file_path'], current_playlist[1]['title'], current_playlist[1]['artist'])
             mixer.load_track_b(t2)
             
-    return {"message": "Automix started", "playlist": ordered}
+    return {"message": "Automix started", "playlist": current_playlist}
 
 @app.post("/api/crossfade")
 async def do_crossfade():
+    global current_track_idx
     mixer.start_crossfade(duration_sec=8.0, bass_swap=True)
+    if current_playlist and current_track_idx < len(current_playlist) - 1:
+        current_track_idx += 1
+        # Preload the next NEXT track if available into B
+        if current_track_idx < len(current_playlist) - 1:
+            t2 = Track(current_playlist[current_track_idx + 1]['file_path'], current_playlist[current_track_idx + 1]['title'], current_playlist[current_track_idx + 1]['artist'])
+            mixer.load_track_b(t2)
     return {"message": "Crossfade triggered!"}
+
+@app.post("/api/next")
+async def skip_next():
+    global current_track_idx
+    if current_playlist and current_track_idx < len(current_playlist) - 1:
+        current_track_idx += 1
+        mixer.is_crossfading = False
+        t = Track(current_playlist[current_track_idx]['file_path'], current_playlist[current_track_idx]['title'], current_playlist[current_track_idx]['artist'])
+        mixer.load_track_a(t)
+        if current_track_idx < len(current_playlist) - 1:
+            t2 = Track(current_playlist[current_track_idx + 1]['file_path'], current_playlist[current_track_idx + 1]['title'], current_playlist[current_track_idx + 1]['artist'])
+            mixer.load_track_b(t2)
+        return {"message": "Skipped to next"}
+    return {"error": "End of queue"}
+
+@app.post("/api/prev")
+async def skip_prev():
+    global current_track_idx
+    if current_playlist and current_track_idx > 0:
+        current_track_idx -= 1
+        mixer.is_crossfading = False
+        t = Track(current_playlist[current_track_idx]['file_path'], current_playlist[current_track_idx]['title'], current_playlist[current_track_idx]['artist'])
+        mixer.load_track_a(t)
+        t2 = Track(current_playlist[current_track_idx + 1]['file_path'], current_playlist[current_track_idx + 1]['title'], current_playlist[current_track_idx + 1]['artist'])
+        mixer.load_track_b(t2)
+        return {"message": "Skipped to prev"}
+    return {"error": "Start of queue"}
 
 @app.post("/api/pause")
 async def toggle_pause():

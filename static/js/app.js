@@ -13,6 +13,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Player Bar
     const playPauseBtn = document.getElementById('playPauseBtn');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const rewindBtn = document.getElementById('rewindBtn');
+    const forwardBtn = document.getElementById('forwardBtn');
     const seekSlider = document.getElementById('seekSlider');
     const currentTimeEl = document.getElementById('currentTime');
     const totalTimeEl = document.getElementById('totalTime');
@@ -201,6 +205,36 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             await fetch('/api/pause', {method: 'POST'});
         }
+    });
+
+    // Transport Buttons
+    nextBtn.addEventListener('click', async () => {
+        await fetch('/api/next', {method: 'POST'});
+    });
+    
+    prevBtn.addEventListener('click', async () => {
+        await fetch('/api/prev', {method: 'POST'});
+    });
+
+    forwardBtn.addEventListener('click', async () => {
+        const currentPos = parseFloat(seekSlider.value);
+        const maxPos = parseFloat(seekSlider.max);
+        const newPos = Math.min(currentPos + 5, maxPos);
+        await fetch('/api/seek', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({position_sec: newPos})
+        });
+    });
+
+    rewindBtn.addEventListener('click', async () => {
+        const currentPos = parseFloat(seekSlider.value);
+        const newPos = Math.max(currentPos - 5, 0);
+        await fetch('/api/seek', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({position_sec: newPos})
+        });
     });
 
     // Seek Slider
