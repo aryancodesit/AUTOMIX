@@ -71,4 +71,17 @@ Open your browser to `http://127.0.0.1:8000`.
 4. Sit back and enjoy the mix.
 
 ---
+
+## 🚀 Future Enhancements
+
+The Automix architecture is designed to be highly extensible. Planned future updates include:
+
+- **Native Desktop Application:** Migrating the HTML/FastAPI frontend to a premium native desktop app using **PyQt6** or **CustomTkinter** for a true, standalone DJ software experience complete with live waveform rendering.
+- **Mix Exporting:** Adding a background recorder to capture the real-time `numpy` output buffer and render your entire 1-hour Automix session directly to a `.wav` or `.mp3` file to share with friends.
+- **Live Beatgrid Sync:** Upgrading the `librosa` onset detection to calculate full track beatgrids, completely eliminating tempo drift during extremely long crossfades.
+- **WebSocket Streaming:** Modifying the engine to stream the raw PCM audio bytes over WebSockets directly to the browser, transforming Automix from a local "Living Room Jukebox" into a globally accessible web app.
+
+---
+> **Note:** This project is fully operable but still actively under development. Feel free to fork, explore, and contribute! `#audiophile`
+
 *Built for the ultimate automated listening experience.*
