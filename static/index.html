@@ -17,12 +17,12 @@
             </div>
             
             <div class="control-panel">
-                <h3>Library Management</h3>
+                <h3>Spotify Cloud Search</h3>
                 <div class="input-group">
-                    <input type="text" id="dirInput" placeholder="d:\Music" value="">
-                    <button id="scanBtn" class="btn primary">Scan Directory</button>
+                    <input type="text" id="searchInput" placeholder="Search a song..." value="">
+                    <button id="searchBtn" class="btn primary">Search</button>
                 </div>
-                <p id="scanStatus" class="status-text"></p>
+                <p id="searchStatus" class="status-text"></p>
             </div>
 
             <div class="control-panel mt-auto">
@@ -52,6 +52,7 @@
                             <th>Title</th>
                             <th>Artist</th>
                             <th>Duration</th>
+                            <th width="100px">Action</th>
                         </tr>
                     </thead>
                     <tbody id="trackList">

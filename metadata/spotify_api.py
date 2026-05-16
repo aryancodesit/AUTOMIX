@@ -74,6 +74,51 @@ class SpotifyMetadataFetcher:
             logger.error(f"Error parsing ID3 for {file_path}: {e}")
             return "Unknown", "Unknown", 0
 
+    def search_tracks(self, query: str, limit: int = 10) -> list[dict]:
+        """Searches Spotify for tracks based on a query."""
+        results = self.sp.search(q=query, type="track", limit=limit)
+        tracks = results.get("tracks", {}).get("items", [])
+        
+        parsed_tracks = []
+        for t in tracks:
+            parsed_tracks.append({
+                "spotify_id": t["id"],
+                "title": t["name"],
+                "artist": t["artists"][0]["name"] if t["artists"] else "Unknown",
+                "duration_ms": t["duration_ms"],
+                "preview_url": t.get("preview_url")
+            })
+        return parsed_tracks
+
+    def fetch_features_by_id(self, track_id: str) -> dict:
+        """Fetches Audio Features directly by Spotify ID."""
+        try:
+            features_list = self.sp.audio_features([track_id])
+            if not features_list or not features_list[0]:
+                raise ValueError("No features returned")
+                
+            feat = features_list[0]
+            key = feat.get("key", -1)
+            mode = feat.get("mode", 1)
+            camelot = CAMELOT_MAP.get((key, mode), "Unknown")
+            
+            return {
+                "bpm": feat.get("tempo", 120.0),
+                "key": key,
+                "mode": mode,
+                "camelot": camelot,
+                "energy": feat.get("energy", 0.5)
+            }
+        except Exception as e:
+            logger.warning(f"Spotify Audio Features API unavailable (likely deprecated 403 error). Using fallback features. Error: {e}")
+            return {
+                "bpm": 120.0,
+                "key": -1,
+                "mode": 1,
+                "camelot": "Unknown",
+                "energy": 0.5
+            }
+
     def fetch_features(self, title: str, artist: str) -> dict:
         """Searches Spotify and retrieves Audio Features."""
         query = f"track:{title} artist:{artist}"

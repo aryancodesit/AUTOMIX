@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const scanBtn = document.getElementById('scanBtn');
-    const dirInput = document.getElementById('dirInput');
-    const scanStatus = document.getElementById('scanStatus');
+    const searchBtn = document.getElementById('searchBtn');
+    const searchInput = document.getElementById('searchInput');
+    const searchStatus = document.getElementById('searchStatus');
     const trackList = document.getElementById('trackList');
     const trackCount = document.getElementById('trackCount');
     const automixBtn = document.getElementById('automixBtn');
@@ -52,18 +52,32 @@ document.addEventListener('DOMContentLoaded', () => {
         trackList.innerHTML = '';
         tracks.forEach(t => {
             const tr = document.createElement('tr');
+            
+            // Check if it's a search result (has spotify_id) or a library track
+            const isSearchResult = t.spotify_id !== undefined;
+            const checkboxHtml = isSearchResult ? 
+                `` : `<input type="checkbox" class="track-select" value="${t.id}">`;
+                
+            const actionHtml = isSearchResult ? 
+                `<button class="btn secondary download-btn" data-id="${t.spotify_id}" data-title="${t.title}" data-artist="${t.artist}" data-duration="${t.duration_ms}">Get</button>` : 
+                `<span class="badge key" style="color:var(--text-muted)">In Library</span>`;
+
             tr.innerHTML = `
-                <td><input type="checkbox" class="track-select" value="${t.id}"></td>
+                <td>${checkboxHtml}</td>
                 <td style="font-weight: 600;">${t.title || 'Unknown'}</td>
                 <td style="color: var(--text-muted);">${t.artist || 'Unknown'}</td>
                 <td><span class="badge">${formatTime(t.duration_ms)}</span></td>
+                <td>${actionHtml}</td>
             `;
             trackList.appendChild(tr);
         });
 
-        // Add listeners to checkboxes
         document.querySelectorAll('.track-select').forEach(cb => {
             cb.addEventListener('change', updateAutomixBtn);
+        });
+        
+        document.querySelectorAll('.download-btn').forEach(btn => {
+            btn.addEventListener('click', handleDownload);
         });
     }
 
@@ -80,30 +94,66 @@ document.addEventListener('DOMContentLoaded', () => {
         updateAutomixBtn();
     });
 
-    scanBtn.addEventListener('click', async () => {
-        const dir = dirInput.value.trim();
-        if(!dir) return;
+    searchBtn.addEventListener('click', async () => {
+        const query = searchInput.value.trim();
+        if(!query) return;
         
-        scanBtn.disabled = true;
-        scanBtn.textContent = "Scanning...";
-        scanStatus.textContent = "Extracting ID3 and querying Spotify API... This may take a moment.";
+        searchBtn.disabled = true;
+        searchBtn.textContent = "Searching...";
+        searchStatus.textContent = "Querying Spotify...";
         
         try {
-            const res = await fetch('/api/scan_directory', {
+            const res = await fetch('/api/search', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({directory: dir})
+                body: JSON.stringify({query: query})
             });
             const data = await res.json();
-            scanStatus.textContent = data.message || data.error;
-            fetchTracks();
+            if (data.results) {
+                renderTracks(data.results);
+                searchStatus.textContent = `Found ${data.results.length} results on Spotify.`;
+            } else {
+                searchStatus.textContent = data.error || "No results found.";
+            }
         } catch(e) {
-            scanStatus.textContent = "Error scanning directory.";
+            searchStatus.textContent = "Error searching Spotify.";
         }
         
-        scanBtn.disabled = false;
-        scanBtn.textContent = "Scan Directory";
+        searchBtn.disabled = false;
+        searchBtn.textContent = "Search";
     });
+
+    async function handleDownload(e) {
+        const btn = e.target;
+        btn.disabled = true;
+        btn.textContent = "Fetching...";
+        
+        const payload = {
+            spotify_id: btn.dataset.id,
+            title: btn.dataset.title,
+            artist: btn.dataset.artist,
+            duration_ms: parseInt(btn.dataset.duration)
+        };
+        
+        try {
+            const res = await fetch('/api/download', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.track_id) {
+                btn.textContent = "Done!";
+                btn.className = "badge key";
+                // Optionally refresh library to show it
+                setTimeout(fetchTracks, 1500);
+            } else {
+                btn.textContent = "Failed";
+            }
+        } catch(err) {
+            btn.textContent = "Error";
+        }
+    }
 
     automixBtn.addEventListener('click', async () => {
         const checked = Array.from(document.querySelectorAll('.track-select:checked')).map(cb => parseInt(cb.value));

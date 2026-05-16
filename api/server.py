@@ -8,6 +8,7 @@ import os
 from metadata.database import Database
 from metadata.spotify_api import SpotifyMetadataFetcher
 from metadata.smart_reorder import SmartReorder
+from core.cloud_fetcher import CloudFetcher
 from core.mixer import Mixer
 from core.audio_engine import AudioEngine
 from core.track import Track
@@ -25,6 +26,7 @@ except ValueError as e:
     spotify = None
 
 reorder_engine = SmartReorder()
+cloud_fetcher = CloudFetcher()
 
 # Global State
 mixer = Mixer()
@@ -42,6 +44,15 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class ScanRequest(BaseModel):
     directory: str
+
+class SearchRequest(BaseModel):
+    query: str
+
+class DownloadRequest(BaseModel):
+    spotify_id: str
+    title: str
+    artist: str
+    duration_ms: int
 
 class AutomixRequest(BaseModel):
     track_ids: list[int]
@@ -89,6 +100,49 @@ async def scan_directory(req: ScanRequest):
                 added += 1
                 
     return {"message": f"Scanned and added {added} new tracks.", "added": added}
+
+@app.post("/api/search")
+async def search_spotify(req: SearchRequest):
+    if not spotify:
+        return {"error": "Spotify not configured."}
+    results = spotify.search_tracks(req.query, limit=10)
+    return {"results": results}
+
+@app.post("/api/download")
+async def download_track(req: DownloadRequest):
+    if not spotify:
+        return {"error": "Spotify not configured."}
+        
+    # Check if already in DB
+    cursor = db.conn.cursor()
+    cursor.execute("SELECT id FROM Tracks WHERE title = ? AND artist = ?", (req.title, req.artist))
+    existing = cursor.fetchone()
+    if existing:
+        return {"message": "Track already in library", "track_id": existing['id']}
+
+    # 1. Fetch Audio via yt-dlp
+    search_query = f"{req.title} {req.artist} official audio"
+    local_path = cloud_fetcher.fetch_audio(req.spotify_id, search_query)
+    
+    if not local_path:
+        return {"error": "Failed to download audio track."}
+        
+    # 2. Add to DB
+    track_id = db.add_track(local_path, req.title, req.artist, req.duration_ms)
+    
+    # 3. Add Audio Features
+    features = spotify.fetch_features_by_id(req.spotify_id)
+    if features:
+        db.add_audio_features(
+            track_id, 
+            features['bpm'], 
+            features['key'], 
+            features['mode'], 
+            features['camelot'], 
+            features['energy']
+        )
+        
+    return {"message": "Track downloaded and added to library", "track_id": track_id}
 
 @app.get("/api/tracks")
 async def get_tracks():
