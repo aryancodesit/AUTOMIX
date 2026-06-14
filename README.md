@@ -85,3 +85,4 @@ The Automix architecture is designed to be highly extensible. Planned future upd
 > **Note:** This project is fully operable but still actively under development. Feel free to fork, explore, and contribute! `#audiophile`
 
 *Built for the ultimate automated listening experience.*
+ 
